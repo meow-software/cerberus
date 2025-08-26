@@ -3,7 +3,7 @@ import { Redis } from 'ioredis';
 
 @Injectable()
 export class RedisService {
-  constructor(@Inject('REDIS') private readonly redis: Redis) {}
+  constructor(@Inject('REDIS_CERBERUS') private readonly redis: Redis) {}
 
   async setJSON(key: string, value: unknown, ttlSeconds?: number) {
     const payload = JSON.stringify(value);
@@ -23,7 +23,7 @@ export class RedisService {
     await this.redis.del(key);
   }
 
-  async setNX(key: string, value: string, ttlSeconds: number) {
-    await this.redis.set(key, value, 'NX', 'EX', ttlSeconds);
-  }
+  // async setNX(key: string, value: string, ttlSeconds: number) {
+  //   await this.redis.set(key, value, 'NX', 'EX', ttlSeconds);
+  // }
 }

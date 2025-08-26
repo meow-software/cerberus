@@ -1,0 +1,39 @@
+services:
+  # Redis cache
+  redis:
+    image: redis:latest
+    container_name: redis 
+    command: > 
+      redis-server 
+      --aclfile /usr/local/etc/redis/users.acl 
+    env_file:
+      - .env
+    volumes:
+      - 'redis-data:/data_redis'
+      - './redis/redis-acl.conf:/usr/local/etc/redis/users.acl' 
+    ports:
+      - "6379:6379"
+    networks:
+      - backend
+
+  # just in dev
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: redis_insight
+    restart: always
+    ports:
+      - "5540:5540"
+    volumes:
+      - redis-insight:/data_redis_insight
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  redis-data:
+    driver: local
+  redis-insight:
+    driver: local
