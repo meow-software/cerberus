@@ -1,14 +1,28 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { Redis } from 'ioredis';
+import { SCRIPT_REDIS_REPLACE_BOT_SESSION } from './lua';
 
 @Injectable()
-export class RedisService {
-  constructor(@Inject('REDIS_CERBERUS') private readonly redis: Redis) { }
+export class RedisService implements OnModuleInit, OnModuleDestroy {
+  protected SCRIPT_REDIS_REPLACE_BOT_SESSION;
+  constructor(@Inject('REDIS_CERBERUS') private readonly redis: Redis) {
+  }
 
   getClient(): Redis {
     return this.redis;
   }
-  
+  async onModuleInit() {
+    this.SCRIPT_REDIS_REPLACE_BOT_SESSION = await this.redis.script('LOAD', SCRIPT_REDIS_REPLACE_BOT_SESSION);
+  }
+
+  async onModuleDestroy() {
+    await this.redis.quit();
+  }
+
+  async replaceBotSession(id: string, jti: string, ttl: number) {
+    await this.getClient().eval(this.SCRIPT_REDIS_REPLACE_BOT_SESSION, 0, id, jti, ttl.toString());
+  }
+
   async setJSON(key: string, value: unknown, ttlSeconds?: number) {
     const payload = JSON.stringify(value);
     if (ttlSeconds && ttlSeconds > 0) {

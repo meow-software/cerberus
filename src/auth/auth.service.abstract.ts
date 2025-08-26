@@ -154,28 +154,17 @@ export abstract class AuthServiceAbstract {
       roles: data.roles,
     };
 
-    // Step 1: Delete all previous sessions for this bot
-    const sessionPattern = `bot:${payload.sub}:session:*`;
-    const keys = await redis.keys(sessionPattern);
-    if (keys.length > 0) {
-      await redis.del(...keys);
-    }
 
-    // Step 2: Generate a fresh token
+    // Step 1: Generate a fresh token
     const accessToken = await this.jwt.signAsync(payload, {
       algorithm: 'RS256',
       privateKey: normalizeKeyFromEnv(process.env.JWT_PRIVATE_KEY),
       expiresIn: ttl,
     });
-
-    // Step 3: Save the new session in Redis
-    await redis.set(
-      `bot:${payload.sub}:session:${jti}`,
-      'active',
-      'EX',
-      ttl,
-    );
     
+    // Step 2: (Delete/ Save) replace all previous sessions for this bot
+    await this.redis.replaceBotSession(payload.sub, jti, ttl)
+
     return {
       access_token: accessToken,
       token_type: 'Bearer',

@@ -4,7 +4,7 @@
  * The script deletes all old sessions with a SCAN/DEL.
  * Then it saves the new token with SET EX.
  */
-const lua = `
+export const SCRIPT_REDIS_REPLACE_BOT_SESSION = `
     -- Supprime toutes les sessions existantes
     local keys = redis.call("KEYS", "bot:" .. ARGV[1] .. ":session:*")
     for i=1,#keys,5000 do
