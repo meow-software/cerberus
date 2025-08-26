@@ -133,7 +133,7 @@ export abstract class AuthServiceAbstract {
 
     return decoded;
   }
-  
+
   /**
    * Generates a JWT token specifically for bot authentication
    * @param data - Object containing bot ID and optional roles
@@ -142,23 +142,44 @@ export abstract class AuthServiceAbstract {
    * @returns Promise resolving to authentication token response object
    */
   protected async generateJwtForBot(data: { id: string, roles?: string[] | string }): Promise<any> {
+    const jti = newJti();
+    const ttl = getBotAccessTtl();
+    const redis = this.redis.getClient();
+
     const payload: AccessPayload = {
       sub: data.id,
       client: 'bot',
       type: 'access',
-      jti: newJti(),
+      jti: jti,
       roles: data.roles,
     };
 
+    // Step 1: Delete all previous sessions for this bot
+    const sessionPattern = `bot:${payload.sub}:session:*`;
+    const keys = await redis.keys(sessionPattern);
+    if (keys.length > 0) {
+      await redis.del(...keys);
+    }
+
+    // Step 2: Generate a fresh token
     const accessToken = await this.jwt.signAsync(payload, {
       algorithm: 'RS256',
       privateKey: normalizeKeyFromEnv(process.env.JWT_PRIVATE_KEY),
-      expiresIn: getAccessTtl(),
+      expiresIn: ttl,
     });
+
+    // Step 3: Save the new session in Redis
+    await redis.set(
+      `bot:${payload.sub}:session:${jti}`,
+      'active',
+      'EX',
+      ttl,
+    );
+    
     return {
       access_token: accessToken,
       token_type: 'Bearer',
-      expires_in: getBotAccessTtl(),
+      expires_in: ttl,
     };
   }
 }

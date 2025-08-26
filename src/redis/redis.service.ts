@@ -3,8 +3,12 @@ import { Redis } from 'ioredis';
 
 @Injectable()
 export class RedisService {
-  constructor(@Inject('REDIS_CERBERUS') private readonly redis: Redis) {}
+  constructor(@Inject('REDIS_CERBERUS') private readonly redis: Redis) { }
 
+  getClient(): Redis {
+    return this.redis;
+  }
+  
   async setJSON(key: string, value: unknown, ttlSeconds?: number) {
     const payload = JSON.stringify(value);
     if (ttlSeconds && ttlSeconds > 0) {
@@ -17,7 +21,7 @@ export class RedisService {
   async getJSON<T = any>(key: string): Promise<T | null> {
     const raw = await this.redis.get(key);
     return raw ? (JSON.parse(raw) as T) : null;
-    }
+  }
 
   async del(key: string) {
     await this.redis.del(key);

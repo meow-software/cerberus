@@ -148,8 +148,7 @@ export class AuthService extends AuthServiceAbstract {
             .send('bot.validate', { clientId, clientSecret }) as any; // TODO: replace with a User interface
 
         if (!bot) throw new UnauthorizedException('Invalid bot credentials');
-
-        return this.generateJwtForBot({
+        const token = this.generateJwtForBot({
             id: bot.id,
             roles: bot.roles,
         });
