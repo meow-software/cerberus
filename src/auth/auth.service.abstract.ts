@@ -8,6 +8,7 @@ import {
   getRefreshTtl,
   normalizeKeyFromEnv,
   newJti,
+  getBotAccessTtl,
 } from '../common/tokens.util';
 import { RedisService } from '../redis/redis.service';
 import {
@@ -29,7 +30,7 @@ export abstract class AuthServiceAbstract {
     protected readonly jwt: JwtService,
     protected readonly redis: RedisService,
     protected readonly userClient: ClientProxy,
-  ) {}
+  ) { }
 
   // ---------- JWT Signing Helpers ----------
 
@@ -131,5 +132,33 @@ export abstract class AuthServiceAbstract {
     }
 
     return decoded;
+  }
+  
+  /**
+   * Generates a JWT token specifically for bot authentication
+   * @param data - Object containing bot ID and optional roles
+   * @param data.id - The bot's unique identifier
+   * @param data.roles - Optional array or string of role permissions
+   * @returns Promise resolving to authentication token response object
+   */
+  protected async generateJwtForBot(data: { id: string, roles?: string[] | string }): Promise<any> {
+    const payload: AccessPayload = {
+      sub: data.id,
+      client: 'bot',
+      type: 'access',
+      jti: newJti(),
+      roles: data.roles,
+    };
+
+    const accessToken = await this.jwt.signAsync(payload, {
+      algorithm: 'RS256',
+      privateKey: normalizeKeyFromEnv(process.env.JWT_PRIVATE_KEY),
+      expiresIn: getAccessTtl(),
+    });
+    return {
+      access_token: accessToken,
+      token_type: 'Bearer',
+      expires_in: getBotAccessTtl(),
+    };
   }
 }

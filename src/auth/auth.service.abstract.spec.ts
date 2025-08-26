@@ -118,6 +118,7 @@ describe('AuthServiceAbstract', () => {
         sub: 'user1',
         type: 'access',
         jti: 'aid',
+        client: 'user'
       });
       expect(result).toBe('signed_access');
       expect(jwt.signAsync).toHaveBeenCalled();
@@ -130,6 +131,7 @@ describe('AuthServiceAbstract', () => {
         type: 'refresh',
         jti: 'rid',
         aid: 'aid',
+        client: 'user'
       });
       expect(result).toBe('signed_refresh');
     });
@@ -141,7 +143,7 @@ describe('AuthServiceAbstract', () => {
         .mockResolvedValueOnce('signed_access')
         .mockResolvedValueOnce('signed_refresh');
 
-      const result = await service.testIssuePair({ sub: 'user1', email: 'test@test.com' });
+      const result = await service.testIssuePair({ sub: 'user1', email: 'test@test.com', client: 'user' });
 
       expect(result).toEqual({
         accessToken: 'signed_access',
@@ -166,6 +168,7 @@ describe('AuthServiceAbstract', () => {
         type: 'refresh',
         jti: 'rid',
         aid: 'aid',
+        client: 'user'
       };
 
       (jwt.verifyAsync as jest.Mock).mockResolvedValue(payload);

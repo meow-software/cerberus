@@ -2,7 +2,8 @@ import { Inject, Injectable, BadRequestException, UnauthorizedException, Forbidd
 import { JwtService } from '@nestjs/jwt';
 import { ClientProxy } from '@nestjs/microservices';
 import {
-    RefreshPayload, 
+    AccessPayload,
+    RefreshPayload,
     UserPayload,
     getAccessTtl,
     getRefreshWindowSeconds
@@ -28,7 +29,7 @@ export class AuthService extends AuthServiceAbstract {
         const user = await this.userClient
             .send('user.register', { email, password, role }) as any; // TODO: replace with a User interface
 
-        const payload: UserPayload = { sub: String(user.id), email: user.email, roles: user.roles };
+        const payload: UserPayload = { sub: String(user.id), email: user.email, roles: user.roles, client: 'user' };
         return this.issuePair(payload);
     }
 
@@ -44,7 +45,7 @@ export class AuthService extends AuthServiceAbstract {
             throw new UnauthorizedException('Invalid credentials.');
         }
 
-        const payload: UserPayload = { sub: String(user.id), email: user.email, roles: user.roles };
+        const payload: UserPayload = { sub: String(user.id), email: user.email, roles: user.roles, client: 'user' };
         return this.issuePair(payload);
     }
 
@@ -96,6 +97,7 @@ export class AuthService extends AuthServiceAbstract {
                 sub: decodedRefresh.sub,
                 email: decodedRefresh.email,
                 roles: decodedRefresh.roles,
+                client: decodedRefresh.client,
             });
         }
 
@@ -105,6 +107,7 @@ export class AuthService extends AuthServiceAbstract {
                 sub: decodedAccess.sub,
                 email: decodedAccess.email,
                 roles: decodedAccess.roles,
+                client: decodedAccess.client,
             });
         }
 
@@ -131,5 +134,24 @@ export class AuthService extends AuthServiceAbstract {
         }
 
         return { ok: true };
+    }
+
+    /**
+     * Validates bot credentials and generates a JWT access token for authenticated bots
+     * @param clientId - The bot's client ID
+     * @param clientSecret - The bot's client secret
+     * @returns Promise resolving to an authentication token response
+     * @throws UnauthorizedException if bot credentials are invalid
+     */
+    async getBotToken(clientId: string, clientSecret: string) {
+        const bot = await this.userClient
+            .send('bot.validate', { clientId, clientSecret }) as any; // TODO: replace with a User interface
+
+        if (!bot) throw new UnauthorizedException('Invalid bot credentials');
+
+        return this.generateJwtForBot({
+            id: bot.id,
+            roles: bot.roles,
+        });
     }
 }

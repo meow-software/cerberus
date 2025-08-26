@@ -20,7 +20,9 @@ export function getRefreshWindowSeconds(): number {
 export function getAccessTtl(): number {
     return parseInt(process.env.ACCESS_TOKEN_TTL ?? '900', 10); // 15 min
 }
-
+export function getBotAccessTtl(): number {
+    return parseInt(process.env.BOT_ACCESS_TOKEN_TTL ?? '86400', 10); // 24 h
+}
 /**
  * Retrieves the refresh token time-to-live (TTL) in seconds from environment variables.
  * Defaults to 2,592,000 seconds (30 days) if not specified.
@@ -68,18 +70,21 @@ export type UserPayload = {
     email?: string;
     /** User roles - can be array of strings or space-separated string (optional) */
     roles?: string[] | string;
+    client: 'user' | 'bot'
+};
+
+export type BaseUserPayload = {
+    /** Token type discriminator - always 'access' for access tokens */
+    type: 'access';
+    /** JWT ID - unique identifier for this token to prevent replay attacks */
+    jti: string;
 };
 
 /**
  * Access token payload structure.
  * Extends UserPayload with access token specific fields.
  */
-export type AccessPayload = UserPayload & {
-    /** Token type discriminator - always 'access' for access tokens */
-    type: 'access';
-    /** JWT ID - unique identifier for this token to prevent replay attacks */
-    jti: string;
-};
+export type AccessPayload = UserPayload &  BaseUserPayload
 
 /**
  * Refresh token payload structure.
