@@ -26,7 +26,7 @@ export function newJti(): string {
 export type UserPayload = {
     sub: string;           // user id
     email?: string;
-    role?: string;
+    roles?: string[] |string;
 };
 
 export type AccessPayload = UserPayload & {
