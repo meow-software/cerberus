@@ -23,4 +23,7 @@ export class RedisService {
     await this.redis.del(key);
   }
 
+  async setNX(key: string, value: string, ttlSeconds: number) {
+    await this.redis.set(key, value, 'EX', ttlSeconds, 'NX');
+  }
 }

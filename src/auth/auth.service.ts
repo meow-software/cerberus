@@ -1,9 +1,11 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { JwtService, JwtSignOptions } from '@nestjs/jwt';
+import { Inject, Injectable, BadRequestException, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { ClientProxy } from '@nestjs/microservices';
 import {
-    AccessPayload, RefreshPayload, UserPayload,
-    getAccessTtl, getRefreshTtl, getAlg, normalizeKeyFromEnv, newJti
+    RefreshPayload, 
+    UserPayload,
+    getAccessTtl,
+    getRefreshWindowSeconds
 } from '../common/tokens.util';
 import { RedisService } from '../redis/redis.service';
 import { AuthServiceAbstract } from './auth.service.abstract';
@@ -11,53 +13,123 @@ import { AuthServiceAbstract } from './auth.service.abstract';
 @Injectable()
 export class AuthService extends AuthServiceAbstract {
     constructor(
-        private readonly _jwt: JwtService,
-        private readonly _redis: RedisService,
-        @Inject("USER_SERVICE") private readonly _userClient: ClientProxy,
+        protected readonly jwt: JwtService,
+        protected readonly redis: RedisService,
+        @Inject("USER_SERVICE") protected readonly userClient: ClientProxy,
     ) {
-        super(_jwt, _redis, _userClient);
+        super(jwt, redis, userClient);
     }
 
-    /** Register : délègue la création d’utilisateur au USER_SERVICE, puis émet les tokens */
+    /**
+     * Register: delegates user creation to the USER_SERVICE,
+     * then issues an access/refresh token pair.
+     */
     async register(email: string, password: string, role?: string) {
         const user = await this.userClient
-            .send('user.register', { email, password, role }) as any; // todo : make user interface
+            .send('user.register', { email, password, role }) as any; // TODO: replace with a User interface
 
         const payload: UserPayload = { sub: String(user.id), email: user.email, roles: user.roles };
         return this.issuePair(payload);
     }
 
-    /** Login : délègue la vérif au USER_SERVICE (pwd), puis émet les tokens */
+    /**
+     * Login: delegates validation to the USER_SERVICE (check password),
+     * then issues an access/refresh token pair.
+     */
     async login(email: string, password: string) {
         const user = await this.userClient
-            .send('user.validate', { email, password }) as any; // todo : make a user interface
+            .send('user.validate', { email, password }) as any; // TODO: replace with a User interface
+
+        if (!user) {
+            throw new UnauthorizedException('Invalid credentials.');
+        }
 
         const payload: UserPayload = { sub: String(user.id), email: user.email, roles: user.roles };
         return this.issuePair(payload);
     }
 
-    /** Refresh : vérifie le refresh token, contrôle Redis, puis ROTATION complète (old → new) */
-    async refresh(refreshToken: string) {
-        const decoded = await this.verifyRefresh(refreshToken);
+    /**
+     * Refresh: requires both refresh token and (optionally) access token.
+     * Rules:
+     *  - Access token must be expired, but within REFRESH_WINDOW_SECONDS (default: 300s = 5 min).
+     *  - Refresh token must still be valid.
+     *  - If refresh is expired but access expired just recently (grace period),
+     *    allow re-issuing tokens based on access claims.
+     */
+    async refresh(refreshToken: string, accessToken?: string) {
+        const nowSec = Math.floor(Date.now() / 1000);
 
-        // Vérifie présence en Redis (session valide)
-        const key = `refresh:${decoded.jti}`;
-        const entry = await this.redis.getJSON<{ uid: string }>(key);
-        if (!entry || entry.uid !== decoded.sub) {
-            throw new Error('Refresh token invalide ou révoqué');
+        // 1) Access token is mandatory for refresh.
+        if (!accessToken) {
+            throw new BadRequestException('Access token required for refresh.');
         }
 
-        // Rotation : révoquer l'ancien, émettre un nouveau couple
-        await this.redis.del(key);
+        const decodedAccess: any = this.jwt.decode(accessToken);
+        if (!decodedAccess || typeof decodedAccess.exp !== 'number') {
+            throw new UnauthorizedException('Invalid access token provided.');
+        }
 
-        const payload: UserPayload = { sub: decoded.sub, email: decoded.email, roles: decoded.roles };
-        return this.issuePair(payload);
+        const exp = decodedAccess.exp as number;
+        const expiredSince = nowSec - exp;
+
+        // 2) Try to verify refresh token
+        let decodedRefresh: RefreshPayload | null = null;
+        try {
+            decodedRefresh = await this.verifyRefresh(refreshToken);
+        } catch {
+            // Refresh invalid or expired → continue to fallback
+        }
+
+        // Case A: Refresh valid → normal workflow
+        if (decodedRefresh) {
+            if (exp > nowSec) {
+                throw new ForbiddenException('Access token still valid — too early to refresh.');
+            }
+            if (expiredSince > getRefreshWindowSeconds()) {
+                throw new ForbiddenException('Access expired too long ago — refresh window exceeded.');
+            }
+
+            // Invalidate the old refresh token (rotation)
+            await this.redis.del(`refresh:${decodedRefresh.jti}`);
+
+            return this.issuePair({
+                sub: decodedRefresh.sub,
+                email: decodedRefresh.email,
+                roles: decodedRefresh.roles,
+            });
+        }
+
+        // Case B: Refresh expired, but access just expired (grace period)
+        if (expiredSince > 0 && expiredSince <= getRefreshWindowSeconds()) {
+            return this.issuePair({
+                sub: decodedAccess.sub,
+                email: decodedAccess.email,
+                roles: decodedAccess.roles,
+            });
+        }
+
+        // Case C: Both tokens invalid or outside allowed window
+        throw new UnauthorizedException('Session expired — please log in again.');
     }
 
-    /** Logout : révoque le refresh et, optionnellement, blacklist l’access courant */
+    /**
+     * Logout: revokes the refresh token (deletes from Redis),
+     * and optionally blacklists the current access token until its expiry.
+     */
     async logout(refreshToken: string, accessTokenJti?: string) {
-        // todo : supprimer le bon token de session
-        
+        try {
+            const decoded = await this.verifyRefresh(refreshToken);
+            await this.redis.del(`refresh:${decoded.jti}`);
+        } catch {
+            // Refresh already invalid → ignore
+        }
+
+        if (accessTokenJti) {
+            // Blacklist access until its expiry
+            const ttl = getAccessTtl();
+            await this.redis.setNX(`bl:access:${accessTokenJti}`, '1', ttl);
+        }
+
         return { ok: true };
     }
 }

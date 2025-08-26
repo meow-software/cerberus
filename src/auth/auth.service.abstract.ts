@@ -1,97 +1,135 @@
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { ClientProxy } from '@nestjs/microservices';
 import {
-    AccessPayload, RefreshPayload, UserPayload,
-    getAccessTtl, getRefreshTtl, getAlg, normalizeKeyFromEnv, newJti
+  AccessPayload,
+  RefreshPayload,
+  UserPayload,
+  getAccessTtl,
+  getRefreshTtl,
+  normalizeKeyFromEnv,
+  newJti,
 } from '../common/tokens.util';
 import { RedisService } from '../redis/redis.service';
+import {
+  UnauthorizedException,
+  InternalServerErrorException,
+  BadRequestException,
+} from '@nestjs/common';
 
+/**
+ * Abstract AuthService containing core JWT/Redis logic.
+ * 
+ * - Always uses RS256 (asymmetric signing with private/public key pair).
+ * - Handles issuing token pairs (access + refresh).
+ * - Stores refresh tokens in Redis with TTL.
+ * - Provides verification helpers for refresh tokens.
+ */
 export abstract class AuthServiceAbstract {
-    constructor(
-        protected readonly jwt: JwtService,
-        protected readonly redis: RedisService,
-        protected readonly userClient: ClientProxy,
-    ) { }
+  constructor(
+    protected readonly jwt: JwtService,
+    protected readonly redis: RedisService,
+    protected readonly userClient: ClientProxy,
+  ) {}
 
-    // ---------- Helpers JWT signing keys/options ----------
-    protected getSignKeyAndOpts(isRefresh: boolean): JwtSignOptions {
-        const alg = getAlg();
+  // ---------- JWT Signing Helpers ----------
 
-        if (alg === 'RS256') {
-            const privateKey = normalizeKeyFromEnv(process.env.JWT_PRIVATE_KEY);
-            if (!privateKey) throw new Error('JWT_PRIVATE_KEY manquant pour RS256');
-            return {
-                algorithm: 'RS256',
-                privateKey,
-                expiresIn: isRefresh ? getRefreshTtl() : getAccessTtl(),
-            };
-        } else {
-            const secret = process.env.JWT_SECRET || '';
-            if (!secret) throw new Error('JWT_SECRET manquant pour HS256');
-            return {
-                algorithm: 'HS256',
-                secret,
-                expiresIn: isRefresh ? getRefreshTtl() : getAccessTtl(),
-            };
-        }
+  /**
+   * Returns signing options for access/refresh tokens.
+   * Always uses RS256 (private key for signing).
+   * @param isRefresh Whether the token is a refresh token.
+   */
+  protected getSignKeyAndOpts(isRefresh: boolean): JwtSignOptions {
+    const privateKey = normalizeKeyFromEnv(process.env.JWT_PRIVATE_KEY);
+    if (!privateKey) {
+      throw new InternalServerErrorException('Missing JWT_PRIVATE_KEY for RS256');
     }
 
-    protected async signAccess(payload: AccessPayload): Promise<string> {
-        const opts = this.getSignKeyAndOpts(false);
-        return this.jwt.signAsync(payload, opts);
+    return {
+      algorithm: 'RS256',
+      privateKey,
+      expiresIn: isRefresh ? getRefreshTtl() : getAccessTtl(),
+    };
+  }
+
+  /**
+   * Sign and return an access token.
+   */
+  protected async signAccess(payload: AccessPayload): Promise<string> {
+    const opts = this.getSignKeyAndOpts(false);
+    return this.jwt.signAsync(payload, opts);
+  }
+
+  /**
+   * Sign and return a refresh token.
+   */
+  protected async signRefresh(payload: RefreshPayload): Promise<string> {
+    const opts = this.getSignKeyAndOpts(true);
+    return this.jwt.signAsync(payload, opts);
+  }
+
+  // ---------- Token Issuing ----------
+
+  /**
+   * Issues a new pair of tokens (access + refresh) for the given user.
+   * 
+   * - Access token: short-lived (e.g. 15m).
+   * - Refresh token: longer-lived (e.g. 7d).
+   * - Refresh is stored in Redis with TTL to allow revocation.
+   */
+  protected async issuePair(user: UserPayload) {
+    const aid = newJti();
+    const rid = newJti();
+
+    const accessPayload: AccessPayload = { ...user, type: 'access', jti: aid };
+    const refreshPayload: RefreshPayload = { ...user, type: 'refresh', jti: rid, aid };
+
+    const [accessToken, refreshToken] = await Promise.all([
+      this.signAccess(accessPayload),
+      this.signRefresh(refreshPayload),
+    ]);
+
+    // Store refresh in Redis (key = refresh:<rid>, value = userId), TTL = refresh duration
+    await this.redis.setJSON(`refresh:${rid}`, { uid: user.sub }, getRefreshTtl());
+
+    return {
+      accessToken,
+      refreshToken,
+      tokenType: 'Bearer',
+      expiresIn: getAccessTtl(),
+    };
+  }
+
+  // ---------- Verification ----------
+
+  /**
+   * Verifies a refresh token with RS256 public key.
+   * Ensures:
+   * - Signature is valid.
+   * - Token is not expired.
+   * - Token is of type "refresh".
+   * 
+   * @throws UnauthorizedException if verification fails.
+   */
+  protected async verifyRefresh(token: string): Promise<RefreshPayload> {
+    const publicKey = normalizeKeyFromEnv(process.env.JWT_PUBLIC_KEY);
+    if (!publicKey) {
+      throw new InternalServerErrorException('Missing JWT_PUBLIC_KEY for RS256');
     }
 
-    protected async signRefresh(payload: RefreshPayload): Promise<string> {
-        const opts = this.getSignKeyAndOpts(true);
-        return this.jwt.signAsync(payload, opts);
+    let decoded: RefreshPayload;
+    try {
+      decoded = await this.jwt.verifyAsync<RefreshPayload>(token, {
+        algorithms: ['RS256'],
+        publicKey,
+      });
+    } catch {
+      throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
-    // ---------- Internals ----------
-    protected async issuePair(user: UserPayload) {
-        const aid = newJti();
-        const rid = newJti();
-
-        const accessPayload: AccessPayload = { ...user, type: 'access', jti: aid };
-        const refreshPayload: RefreshPayload = { ...user, type: 'refresh', jti: rid, aid };
-
-        const [accessToken, refreshToken] = await Promise.all([
-            this.signAccess(accessPayload),
-            this.signRefresh(refreshPayload),
-        ]);
-
-        // Stocker le refresh en Redis (clé → userId); TTL = durée du refresh
-        await this.redis.setJSON(`refresh:${rid}`, { uid: user.sub }, getRefreshTtl());
-
-        return {
-            accessToken,
-            refreshToken,
-            tokenType: 'Bearer',
-            expiresIn: getAccessTtl(),
-        };
+    if (decoded.type !== 'refresh') {
+      throw new BadRequestException('Invalid token type: expected refresh');
     }
 
-    protected async verifyRefresh(token: string): Promise<RefreshPayload> {
-        const alg = getAlg();
-        const verifyOpts: any = { algorithms: [alg] };
-
-        let key: string;
-        if (alg === 'RS256') {
-            key = normalizeKeyFromEnv(process.env.JWT_PUBLIC_KEY);
-            if (!key) throw new Error('JWT_PUBLIC_KEY manquant');
-            verifyOpts.publicKey = key;
-        } else {
-            key = process.env.JWT_SECRET || '';
-            if (!key) throw new Error('JWT_SECRET manquant');
-            verifyOpts.secret = key;
-        }
-
-        const decoded = await this.jwt.verifyAsync<RefreshPayload>(token, {
-            ...verifyOpts,
-        });
-
-        if (decoded.type !== 'refresh') {
-            throw new Error('Mauvais type de token');
-        }
-        return decoded;
-    }
+    return decoded;
+  }
 }
