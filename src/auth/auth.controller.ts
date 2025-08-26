@@ -19,13 +19,11 @@ export class AuthController {
   async login(@Body() dto: LoginDto) {
     return this.auth.login(dto.email, dto.password);
   }
-
   
   @Post('refresh')
   async refresh(@Body() dto: RefreshDto) {
     return this.auth.refresh(dto.refreshToken, dto.accessToken);
   }
-
   
   @Post('logout')
   async logout(@Body() dto: RefreshDto, @Req() req: Request) {
