@@ -11,7 +11,6 @@ export class AuthController {
 
   @Post('register')
   async register(@Body() dto: RegisterDto) {
-    // On délègue la création à USER_SERVICE côté service
     return this.auth.register(dto.email, dto.password, dto.role);
   }
 
@@ -27,8 +26,6 @@ export class AuthController {
   
   @Post('logout')
   async logout(@Body() dto: RefreshDto, @Req() req: Request) {
-    // Si tu passes l'access token en Authorization: Bearer xxx, récupère son jti si présent dans req.user
-    // Ici on n’est pas derrière JwtGuard sur /logout, donc pas de req.user; on peut le passer en header custom
     const accessJti = req.headers['x-access-jti'] as string | undefined;
     return this.auth.logout(dto.refreshToken, accessJti);
   }
