@@ -89,14 +89,18 @@ export abstract class AuthServiceAbstract {
       this.signRefresh(refreshPayload),
     ]);
 
-    // Store refresh in Redis (key = refresh:<rid>, value = userId), TTL = refresh duration
-    await this.redis.setJSON(`refresh:${rid}`, { uid: user.sub }, getRefreshTtl());
 
     return {
-      accessToken,
-      refreshToken,
-      tokenType: 'Bearer',
-      expiresIn: getAccessTtl(),
+      payload : {
+        accessPayload,
+        refreshPayload
+      },
+      pair: {
+        accessToken,
+        refreshToken,
+        tokenType: 'Bearer',
+        expiresIn: getAccessTtl(),
+      }
     };
   }
 
@@ -161,9 +165,9 @@ export abstract class AuthServiceAbstract {
       privateKey: normalizeKeyFromEnv(process.env.JWT_PRIVATE_KEY),
       expiresIn: ttl,
     });
-    
+
     // Step 2: (Delete/ Save) replace all previous sessions for this bot
-    await this.redis.replaceBotSession(payload.sub, jti, ttl)
+    await this.redis.replaceBotSession(payload.client, payload.sub, jti, ttl)
 
     return {
       access_token: accessToken,

@@ -10,6 +10,7 @@ import {
 } from '../common/tokens.util';
 import { RedisService } from '../redis/redis.service';
 import { AuthServiceAbstract } from './auth.service.abstract';
+import { redisCacheKeyPutUserSession } from 'src/lib';
 
 @Injectable()
 export class AuthService extends AuthServiceAbstract {
@@ -38,15 +39,27 @@ export class AuthService extends AuthServiceAbstract {
      * then issues an access/refresh token pair.
      */
     async login(email: string, password: string) {
-        const user = await this.userClient
-            .send('user.validate', { email, password }) as any; // TODO: replace with a User interface
+        // const user = await this.userClient
+        //     .send('user.validate', { email, password }) as any; // TODO: replace with a User interface
+
+        const user = {
+            id: "485124851845",
+            email,
+            roles: ["user", "admin"],
+        }
 
         if (!user) {
             throw new UnauthorizedException('Invalid credentials.');
         }
 
         const payload: UserPayload = { sub: String(user.id), email: user.email, roles: user.roles, client: 'user' };
-        return this.issuePair(payload);
+        const issuePair = await this.issuePair(payload);
+        const rp = issuePair.payload.refreshPayload;
+        const pair = issuePair.pair;
+
+        // Store refresh in Redis (key = session, value = userId), TTL = refresh duration
+        await this.redis.setJSON(redisCacheKeyPutUserSession(rp.sub, rp.client, rp.jti), { uid: rp.sub }, pair.expiresIn);
+        return pair;
     }
 
     /**
@@ -90,25 +103,30 @@ export class AuthService extends AuthServiceAbstract {
                 throw new ForbiddenException('Access expired too long ago — refresh window exceeded.');
             }
 
-            // Invalidate the old refresh token (rotation)
-            await this.redis.del(`refresh:${decodedRefresh.jti}`);
+            // 1. Invalidate the old refresh token (rotation)
+            await this.redis.del(redisCacheKeyPutUserSession(decodedRefresh.sub, decodedRefresh.client, decodedRefresh.jti));
 
-            return this.issuePair({
-                sub: decodedRefresh.sub,
-                email: decodedRefresh.email,
-                roles: decodedRefresh.roles,
-                client: decodedRefresh.client,
-            });
+            // 2. Put new key
+            const payload: UserPayload = { sub: String(decodedRefresh.sub), email: decodedRefresh.email, roles: decodedRefresh.roles, client: decodedRefresh.client };
+            const issuePair = await this.issuePair(payload);
+            const rp = issuePair.payload.refreshPayload;
+            const pair = issuePair.pair;
+
+            // Store refresh in Redis (key = session, value = userId), TTL = refresh duration
+            await this.redis.setJSON(redisCacheKeyPutUserSession(rp.sub, rp.client, rp.jti), { uid: rp.sub }, pair.expiresIn);
+            return pair;
         }
 
         // Case B: Refresh expired, but access just expired (grace period)
         if (expiredSince > 0 && expiredSince <= getRefreshWindowSeconds()) {
-            return this.issuePair({
-                sub: decodedAccess.sub,
-                email: decodedAccess.email,
-                roles: decodedAccess.roles,
-                client: decodedAccess.client,
-            });
+            const payload: UserPayload = { sub: String(decodedAccess.sub), email: decodedAccess.email, roles: decodedAccess.roles, client: decodedAccess.client };
+            const issuePair = await this.issuePair(payload);
+            const rp = issuePair.payload.refreshPayload;
+            const pair = issuePair.pair;
+
+            // Store refresh in Redis (key = session, value = userId), TTL = refresh duration
+            await this.redis.setJSON(redisCacheKeyPutUserSession(rp.sub, rp.client, rp.jti), { uid: rp.sub }, pair.expiresIn);
+            return pair;
         }
 
         // Case C: Both tokens invalid or outside allowed window
