@@ -7,7 +7,7 @@ import {
     UserPayload,
     getAccessTtl,
     getRefreshWindowSeconds
-} from '../common/tokens.util';
+} from 'src/lib';
 import { RedisService } from '../redis/redis.service';
 import { AuthServiceAbstract } from './auth.service.abstract';
 import { redisCacheKeyPutUserSession } from 'src/lib';

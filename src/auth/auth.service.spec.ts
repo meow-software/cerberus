@@ -8,7 +8,7 @@ import {
   UnauthorizedException,
   ForbiddenException,
 } from '@nestjs/common';
-import { getAccessTtl, getRefreshWindowSeconds } from '../common/tokens.util';
+import { getAccessTtl, getRefreshWindowSeconds } from 'src/lib';
 import { redisCacheKeyPutUserSession } from 'src/lib';
 
 describe('AuthService', () => {

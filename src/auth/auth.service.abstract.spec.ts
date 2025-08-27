@@ -14,7 +14,7 @@ import {
   UserPayload,
   getAccessTtl,
   getRefreshTtl,
-} from '../common/tokens.util';
+} from 'src/lib';
 
 // Implémentation concrète pour tester la classe abstraite
 class TestAuthService extends AuthServiceAbstract {

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { normalizeKeyFromEnv } from '../common/tokens.util';
+import { normalizeKeyFromEnv } from '../lib/common/tokens.util';
 
 /**
  * JwtStrategy

@@ -9,7 +9,7 @@ import {
   normalizeKeyFromEnv,
   newJti,
   getBotAccessTtl,
-} from '../common/tokens.util';
+} from 'src/lib';
 import { RedisService } from '../redis/redis.service';
 import {
   UnauthorizedException,
