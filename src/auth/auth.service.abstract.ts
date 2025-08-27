@@ -77,7 +77,7 @@ export abstract class AuthServiceAbstract {
    * - Refresh token: longer-lived (e.g. 7d).
    * - Refresh is stored in Redis with TTL to allow revocation.
    */
-  protected async issuePair(user: UserPayload) {
+  protected async issuePair(user: UserPayload, expiresIn=getAccessTtl()) {
     const aid = newJti();
     const rid = newJti();
 
@@ -99,7 +99,7 @@ export abstract class AuthServiceAbstract {
         accessToken,
         refreshToken,
         tokenType: 'Bearer',
-        expiresIn: getAccessTtl(),
+        expiresIn: expiresIn,
       }
     };
   }
@@ -160,15 +160,12 @@ export abstract class AuthServiceAbstract {
 
 
     // Step 1: Generate a fresh token
-    const accessToken = await this.jwt.signAsync(payload, {
-      algorithm: 'RS256',
-      privateKey: normalizeKeyFromEnv(process.env.JWT_PRIVATE_KEY),
-      expiresIn: ttl,
-    });
+    const issuePair = await this.issuePair(payload, ttl);
+    const accessToken = issuePair.pair.accessToken;
+    // can be ignore other information
 
     // Step 2: (Delete/ Save) replace all previous sessions for this bot
     await this.redis.replaceBotSession(payload.client, payload.sub, jti, ttl)
-
     return {
       access_token: accessToken,
       token_type: 'Bearer',

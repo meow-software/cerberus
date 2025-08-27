@@ -20,7 +20,7 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   }
 
   async replaceBotSession(clientType: string, id: string, jti: string, ttl: number) {
-    await this.getClient().eval(this.SCRIPT_REDIS_REPLACE_BOT_SESSION, 0, clientType, id, jti, ttl.toString());
+    return await this.getClient().evalsha(this.SCRIPT_REDIS_REPLACE_BOT_SESSION, 0, clientType, id, jti, ttl.toString());
   }
 
   async setJSON(key: string, value: unknown, ttlSeconds?: number) {
