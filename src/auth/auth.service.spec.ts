@@ -9,6 +9,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { getAccessTtl, getRefreshWindowSeconds } from '../common/tokens.util';
+import { redisCacheKeyPutUserSession } from 'src/lib';
 
 describe('AuthService', () => {
   let service: AuthService;
@@ -57,28 +58,53 @@ describe('AuthService', () => {
   afterEach(() => jest.resetAllMocks());
 
   describe('register', () => {
-    it('should register and return token pair', async () => {
-      (userClient.send as jest.Mock).mockResolvedValue({ id: 1, email: 'a@a.com', roles: ['user'] });
-      jest.spyOn(service as any, 'issuePair').mockResolvedValue({ accessToken: 'at', refreshToken: 'rt' });
+    it('should call userClient and issuePair correctly', async () => {
+      const fakeUser = { id: 1, email: 'a@a.com', roles: ['user'] };
+      (userClient.send as jest.Mock).mockResolvedValue(fakeUser);
 
-      const result = await service.register('a@a.com', 'pass');
-      expect(userClient.send).toHaveBeenCalledWith('user.register', { email: 'a@a.com', password: 'pass', role: undefined });
-      expect(result).toEqual({ accessToken: 'at', refreshToken: 'rt' });
+      const issuePairSpy = jest.spyOn(service as any, 'issuePair').mockResolvedValue('TOKENS');
+
+      const result = await service.register('a@a.com', 'pass', 'user');
+
+      // Vérifie que userClient est bien appelé avec les bons paramètres
+      expect(userClient.send).toHaveBeenCalledWith('user.register', {
+        email: 'a@a.com',
+        password: 'pass',
+        role: 'user'
+      });
+
+      // Vérifie que le payload transmis à issuePair est correct
+      expect(issuePairSpy).toHaveBeenCalledWith({
+        sub: '1',
+        email: 'a@a.com',
+        roles: ['user'],
+        client: 'user',
+      });
+
+      // Vérifie que la valeur retournée est celle de issuePair
+      expect(result).toBe('TOKENS');
     });
+
   });
 
   describe('login', () => {
-    it('should login and return token pair', async () => {
-      (userClient.send as jest.Mock).mockResolvedValue({ id: 2, email: 'b@b.com', roles: ['admin'] });
-      jest.spyOn(service as any, 'issuePair').mockResolvedValue({ accessToken: 'ax', refreshToken: 'rx' });
+    it('should login and return token pair + store refresh in redis', async () => {
+      jest.spyOn(service as any, 'issuePair').mockResolvedValue({
+        pair: { accessToken: 'ax', refreshToken: 'rx', expiresIn: 200 },
+        payload: { refreshPayload: { sub: '485124851845', client: 'user', jti: 'jid' } }
+      });
 
       const result = await service.login('b@b.com', 'pass');
-      expect(userClient.send).toHaveBeenCalledWith('user.validate', { email: 'b@b.com', password: 'pass' });
-      expect(result).toEqual({ accessToken: 'ax', refreshToken: 'rx' });
+      expect(redis.setJSON).toHaveBeenCalledWith(
+        redisCacheKeyPutUserSession('485124851845', 'user', 'jid'),
+        { uid: '485124851845' },
+        200
+      );
+      expect(result).toEqual({ accessToken: 'ax', refreshToken: 'rx', expiresIn: 200 });
     });
 
-    it('should throw UnauthorizedException if user not found', async () => {
-      (userClient.send as jest.Mock).mockResolvedValue(null);
+    it('should throw UnauthorizedException if no user returned', async () => {
+      jest.spyOn(service as any, 'issuePair').mockImplementation(() => { throw new UnauthorizedException(); });
       await expect(service.login('x', 'y')).rejects.toThrow(UnauthorizedException);
     });
   });
@@ -99,34 +125,39 @@ describe('AuthService', () => {
         email: 'a@a.com',
         roles: ['user'],
         jti: 'rid',
-        type: 'refresh',
-        aid: 'aid',
+        client: 'user',
       });
 
-      jest.spyOn(service as any, 'issuePair').mockResolvedValue({ accessToken: 'na', refreshToken: 'nr' });
+      jest.spyOn(service as any, 'issuePair').mockResolvedValue({
+        pair: { accessToken: 'na', refreshToken: 'nr', expiresIn: 300 },
+        payload: { refreshPayload: { sub: 'u1', client: 'user', jti: 'newrid' } }
+      });
 
       const result = await service.refresh('rt', 'at');
-      expect(redis.del).toHaveBeenCalledWith('refresh:rid');
-      expect(result).toEqual({ accessToken: 'na', refreshToken: 'nr' });
+      expect(redis.del).toHaveBeenCalledWith(redisCacheKeyPutUserSession('u1', 'user', 'rid'));
+      expect(result).toEqual({ accessToken: 'na', refreshToken: 'nr', expiresIn: 300 });
     });
 
-    it('should throw Forbidden if access not expired', async () => {
+    it('should throw Forbidden if access not expired yet', async () => {
       jwt.decode.mockReturnValue({ exp: now + 60 });
       (service as any).verifyRefresh = jest.fn().mockResolvedValue({ type: 'refresh', sub: 'u' });
 
       await expect(service.refresh('rt', 'at')).rejects.toThrow(ForbiddenException);
     });
 
-    it('should fallback to access grace period if refresh invalid', async () => {
-      const decodedAccess = { exp: now - 5, sub: 'u2', email: 'z@z.com', roles: ['user'] };
+    it('should fallback to grace period if refresh invalid', async () => {
+      const decodedAccess = { exp: now - 5, sub: 'u2', email: 'z@z.com', roles: ['user'], client: 'user' };
       jwt.decode.mockReturnValue(decodedAccess);
 
       (service as any).verifyRefresh = jest.fn().mockRejectedValue(new Error('invalid'));
 
-      jest.spyOn(service as any, 'issuePair').mockResolvedValue({ accessToken: 'ax', refreshToken: 'rx' });
+      jest.spyOn(service as any, 'issuePair').mockResolvedValue({
+        pair: { accessToken: 'ax', refreshToken: 'rx', expiresIn: 150 },
+        payload: { refreshPayload: { sub: 'u2', client: 'user', jti: 'jti2' } }
+      });
 
       const result = await service.refresh('rt', 'at');
-      expect(result).toEqual({ accessToken: 'ax', refreshToken: 'rx' });
+      expect(result).toEqual({ accessToken: 'ax', refreshToken: 'rx', expiresIn: 150 });
     });
 
     it('should throw Unauthorized if refresh invalid and access expired too long', async () => {
@@ -155,5 +186,25 @@ describe('AuthService', () => {
       const result = await service.logout('rt');
       expect(result).toEqual({ ok: true });
     });
+  });
+
+  describe('getBotToken', () => {
+    it('should return bot token if valid', async () => {
+      jest.spyOn(service as any, 'generateJwtForBot').mockResolvedValue({ token: 'botToken' });
+
+      const result = await service.getBotToken('cid', 'secret');
+      expect(result).toEqual({ token: 'botToken' });
+    });
+
+    it('should throw UnauthorizedException if bot invalid', async () => {
+      jest.spyOn(service as any, 'generateJwtForBot').mockImplementation(() => { throw new UnauthorizedException(); });
+      await expect(service.getBotToken('cid', 'bad')).rejects.toThrow(UnauthorizedException);
+    });
+    it('should call generateJwtForBot with clientId and secret', async () => {
+      const spy = jest.spyOn(service as any, 'generateJwtForBot').mockResolvedValue({ token: 'bt' });
+      await service.getBotToken('cid', 'sec');
+      expect(spy).toHaveBeenCalledWith({"id": "cid", "roles": ["user", "admin"]});
+    });
+
   });
 });

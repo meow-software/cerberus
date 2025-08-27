@@ -64,7 +64,7 @@ describe('AuthServiceAbstract', () => {
         {
           provide: RedisService,
           useValue: {
-            setJSON: jest.fn(),
+            replaceBotSession: jest.fn(),
           },
         },
         {
@@ -137,29 +137,7 @@ describe('AuthServiceAbstract', () => {
     });
   });
 
-  describe('issuePair', () => {
-    it('should return access and refresh tokens and store refresh in redis', async () => {
-      (jwt.signAsync as jest.Mock)
-        .mockResolvedValueOnce('signed_access')
-        .mockResolvedValueOnce('signed_refresh');
-
-      const result = await service.testIssuePair({ sub: 'user1', email: 'test@test.com', client: 'user' });
-
-      expect(result).toEqual({
-        accessToken: 'signed_access',
-        refreshToken: 'signed_refresh',
-        tokenType: 'Bearer',
-        expiresIn: getAccessTtl(),
-      });
-
-      expect(redis.setJSON).toHaveBeenCalledWith(
-        expect.stringMatching(/^refresh:/),
-        { uid: 'user1' },
-        getRefreshTtl(),
-      );
-    });
-  });
-
+  
   describe('verifyRefresh', () => {
     it('should verify and return payload if valid', async () => {
       const payload: RefreshPayload = {

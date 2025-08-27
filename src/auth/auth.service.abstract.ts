@@ -158,7 +158,6 @@ export abstract class AuthServiceAbstract {
       roles: data.roles,
     };
 
-
     // Step 1: Generate a fresh token
     const issuePair = await this.issuePair(payload, ttl);
     const accessToken = issuePair.pair.accessToken;
