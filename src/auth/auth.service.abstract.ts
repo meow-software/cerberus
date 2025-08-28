@@ -1,5 +1,4 @@
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
-import { ClientProxy } from '@nestjs/microservices';
 import {
   AccessPayload,
   RefreshPayload,
@@ -19,6 +18,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import * as speakeasy from "speakeasy";
+import { UserProxyService } from './proxy/user-proxy.service';
 
 /**
  * Abstract AuthService containing core JWT/Redis logic.
@@ -32,7 +32,7 @@ export abstract class AuthServiceAbstract {
   constructor(
     protected readonly jwt: JwtService,
     protected readonly redis: RedisService,
-    protected readonly userClient: ClientProxy,
+    protected readonly userClient: UserProxyService,
     protected readonly eventBus: IEventBus
   ) { }
 

@@ -23,10 +23,12 @@ export class AuthController {
     if (!token) throw new BadRequestException('Token required');
     return this.auth.confirmRegister(token);
   }
-  
+
   @Post('register/confirm/resend')
-  async resendConfirmation(@Body('email') dto: ResendConfirmationDto) {
-    return this.auth.resendConfirmationEmail(dto.id);
+  async resendConfirmation(@Body('email') dto: ResendConfirmationDto,
+    @Req() req: Request
+  ) {
+    return this.auth.resendConfirmationEmail(dto.id, req.headers);
   }
 
   @Post('login')
@@ -48,14 +50,19 @@ export class AuthController {
   }
 
   @Post('reset-password/demand')
-  async resetPasswordDemand(@Body() dto: ResetPasswordDemandDto) {
-    return this.auth.resetPasswordDemand(dto.id);
+  async resetPasswordDemand(
+    @Body() dto: ResetPasswordDemandDto,
+    @Req() req: Request) {
+    return this.auth.resetPasswordDemand(dto.id, req.headers);
   }
 
 
   @Post('reset-password/confirmation')
-  async resetPasswordConfirmation(@Body() dto: ResetPasswordConfirmationDto) {
-    return this.auth.resetPasswordConfirmation(dto.code, dto.id, dto.password, dto.oldPassword);
+  async resetPasswordConfirmation(
+    @Body() dto: ResetPasswordConfirmationDto,
+    @Req() req: Request
+  ) {
+    return this.auth.resetPasswordConfirmation(dto.code, dto.id, dto.password, dto.oldPassword, req.headers);
   }
 
   @Post('logout')
