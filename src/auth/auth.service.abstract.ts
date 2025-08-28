@@ -219,7 +219,7 @@ export abstract class AuthServiceAbstract {
     // Generate code
     const code = speakeasy.totp({
       secret: process.env.OTP_SECRET_CODE,
-      digits: 5,
+      digits: 6,
       step: process.env.OTP_STEP_TIME ?? 1800,
       encoding: "base32",
     });
@@ -235,7 +235,7 @@ export abstract class AuthServiceAbstract {
     return speakeasy.totp.verify({
       secret: process.env.OTP_SECRET_CODE,
       token: code,
-      digits: 5,
+      digits: 6,
       step: process.env.OTP_STEP_TIME ?? 1800, 
       encoding: "base32",
     });

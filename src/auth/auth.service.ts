@@ -19,7 +19,7 @@ export class AuthService extends AuthServiceAbstract {
         protected readonly jwt: JwtService,
         protected readonly redis: RedisService,
         @Inject("USER_SERVICE") protected readonly userClient: ClientProxy,
-        @Inject("EVENT_BUS") private readonly eventBus: eventBusInterface.IEventBus,
+        @Inject("EVENT_BUS") protected readonly eventBus: eventBusInterface.IEventBus,
     ) {
         super(jwt, redis, userClient, eventBus);
     }
@@ -41,6 +41,21 @@ export class AuthService extends AuthServiceAbstract {
     async confirmRegister(token: string) {
         this.confirmEmailRegister(token);
     }
+
+    async resendConfirmationEmail(id: eventBusInterface.Snowflake) {
+        const user = await this.userClient
+            .send("user.id", { id }) as any;
+
+        if (!user) throw new BadRequestException("No user found with this id.");
+        if (user.isConfirmed) {
+            throw new BadRequestException("Account already confirmed.");
+        }
+
+        this.sendEmailConfirmation(user.id, user.email);
+
+        return { success: true, message: "Confirmation email resent." };
+    }
+
 
     /**
      * Login: delegates validation to the USER_SERVICE (check password),
@@ -145,10 +160,9 @@ export class AuthService extends AuthServiceAbstract {
     /**
      * Reset password demand
      */
-    async resetPasswordDemand(resetPasswordDemandDto: ResetPasswordDemandDto) {
-        const { email } = resetPasswordDemandDto;
+    async resetPasswordDemand(userId : eventBusInterface.Snowflake) {
 
-        const user = await this.userClient.send("user.findByEmail", { email }).toPromise();
+        const user = await this.userClient.send("user.findByEmail", { id : userId }).toPromise();
         if (!user) throw new BadRequestException("No user found with this email");
 
         this.sendEmailResetPassword(user.id, user.email);
@@ -159,14 +173,13 @@ export class AuthService extends AuthServiceAbstract {
     /**
      * Reset password confirmation
      */
-    async resetPasswordConfirmation(resetPasswordConfirmationDto: ResetPasswordConfirmationDto) {
-        const { code, email, password, oldPassword } = resetPasswordConfirmationDto;
+    async resetPasswordConfirmation(code: string, userId : string, password : string, oldPassword : string) {
         // 1. Check OTP
         const match = this.checkOTP(code);
         if (!match) return new UnauthorizedException("Invalid/expired token");
 
         // 2. Edit password
-        return await this.userClient.send("user.update password", { email, password, oldPassword });
+        return await this.userClient.send("user.update password", { id: userId, password, oldPassword });
     }
 
     /**

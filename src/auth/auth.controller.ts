@@ -1,10 +1,13 @@
-import { Body, Controller, HttpCode, HttpStatus, Inject, Post, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, HttpCode, HttpStatus, Inject, Post, Query, Req } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
 import Request from 'express';
-import { ClientCredentialsDto } from './dto/bot-credentials.dto';
+import { ClientCredentialsDto } from './dto/client-credentials.dto';
+import { ResendConfirmationDto } from './dto/resend-confirmation.dto';
+import { ResetPasswordDemandDto } from './dto/reset-password.dto';
+import { ResetPasswordConfirmationDto } from './dto/reset-password-confirmation.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -12,8 +15,18 @@ export class AuthController {
 
   @Post('register')
   async register(@Body() dto: RegisterDto) {
-    console.log("--la")
     return this.auth.register(dto.email, dto.password, dto.role);
+  }
+
+  @Get('register/confirm')
+  async registerConfirm(@Query('token') token: string) {
+    if (!token) throw new BadRequestException('Token required');
+    return this.auth.confirmRegister(token);
+  }
+  
+  @Post('register/confirm/resend')
+  async resendConfirmation(@Body('email') dto: ResendConfirmationDto) {
+    return this.auth.resendConfirmationEmail(dto.id);
   }
 
   @Post('login')
@@ -21,18 +34,33 @@ export class AuthController {
     return this.auth.login(dto.email, dto.password);
   }
 
+  @Post('bot/login')
+  async getBotToken(@Body() dto: ClientCredentialsDto) {
+    return this.auth.getBotToken(dto.id, dto.clientSecret);
+  }
+
   @Post('refresh')
-  async refresh(@Body() dto: RefreshDto) {
-    return this.auth.refresh(dto.refreshToken, dto.accessToken);
+  async refresh(
+    @Body('refreshToken') dto: RefreshDto,
+    @Headers('authorization') authorization?: string) {
+    const accessToken = authorization?.replace('Bearer ', '');
+    return this.auth.refresh(dto.refreshToken, accessToken);
+  }
+
+  @Post('reset-password/demand')
+  async resetPasswordDemand(@Body() dto: ResetPasswordDemandDto) {
+    return this.auth.resetPasswordDemand(dto.id);
+  }
+
+
+  @Post('reset-password/confirmation')
+  async resetPasswordConfirmation(@Body() dto: ResetPasswordConfirmationDto) {
+    return this.auth.resetPasswordConfirmation(dto.code, dto.id, dto.password, dto.oldPassword);
   }
 
   @Post('logout')
   async logout(@Body() dto: RefreshDto, @Req() req: Request) {
     const accessJti = req.headers['x-access-jti'] as string | undefined;
     return this.auth.logout(dto.refreshToken, accessJti);
-  }
-  @Post('bot/login')
-  async getBotToken(@Body() dto: ClientCredentialsDto) {
-    return this.auth.getBotToken(dto.clientId, dto.clientSecret);
   }
 }
