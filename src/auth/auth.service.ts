@@ -11,6 +11,7 @@ import {
 import { RedisService } from '../redis/redis.service';
 import { AuthServiceAbstract } from './auth.service.abstract';
 import { redisCacheKeyPutUserSession } from 'src/lib';
+import * as eventBusInterface from 'src/lib';
 
 @Injectable()
 export class AuthService extends AuthServiceAbstract {
@@ -18,8 +19,9 @@ export class AuthService extends AuthServiceAbstract {
         protected readonly jwt: JwtService,
         protected readonly redis: RedisService,
         @Inject("USER_SERVICE") protected readonly userClient: ClientProxy,
+        @Inject("EVENT_BUS") private readonly eventBus: eventBusInterface.IEventBus,
     ) {
-        super(jwt, redis, userClient);
+        super(jwt, redis, userClient, eventBus);
     }
 
     /**
@@ -28,10 +30,16 @@ export class AuthService extends AuthServiceAbstract {
      */
     async register(email: string, password: string, role?: string) {
         const user = await this.userClient
-            .send('user.register', { email, password, role }) as any; // TODO: replace with a User interface
+            .send('user.register', { email, password, role }) as any;
+
+        this.sendEmailConfirmation(user.id, user.email);
 
         const payload: UserPayload = { sub: String(user.id), email: user.email, roles: user.roles, client: 'user' };
-        return this.issuePair(payload);
+        return { ...this.issuePair(payload), message: "Check your email to confirm your account." };
+    }
+
+    async confirmRegister(token: string) {
+        this.confirmEmailRegister(token);
     }
 
     /**
@@ -133,6 +141,34 @@ export class AuthService extends AuthServiceAbstract {
         throw new UnauthorizedException('Session expired — please log in again.');
     }
 
+
+    /**
+     * Reset password demand
+     */
+    async resetPasswordDemand(resetPasswordDemandDto: ResetPasswordDemandDto) {
+        const { email } = resetPasswordDemandDto;
+
+        const user = await this.userClient.send("user.findByEmail", { email }).toPromise();
+        if (!user) throw new BadRequestException("No user found with this email");
+
+        this.sendEmailResetPassword(user.id, user.email);
+
+        return { success: true, message: "Password reset link sent to your email" };
+    }
+
+    /**
+     * Reset password confirmation
+     */
+    async resetPasswordConfirmation(resetPasswordConfirmationDto: ResetPasswordConfirmationDto) {
+        const { code, email, password, oldPassword } = resetPasswordConfirmationDto;
+        // 1. Check OTP
+        const match = this.checkOTP(code);
+        if (!match) return new UnauthorizedException("Invalid/expired token");
+
+        // 2. Edit password
+        return await this.userClient.send("user.update password", { email, password, oldPassword });
+    }
+
     /**
      * Logout: revokes the refresh token (deletes from Redis),
      * and optionally blacklists the current access token until its expiry.
@@ -166,7 +202,7 @@ export class AuthService extends AuthServiceAbstract {
         //     .send('bot.validate', { clientId, clientSecret }) as any; // TODO: replace with a User interface
 
         const bot = {
-            id : clientId,
+            id: clientId,
             clientSecret,
             roles: ["user", "admin"],
         }

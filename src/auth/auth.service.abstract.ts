@@ -9,6 +9,8 @@ import {
   normalizeKeyFromEnv,
   newJti,
   getBotAccessTtl,
+  IEventBus,
+  Snowflake,
 } from 'src/lib';
 import { RedisService } from '../redis/redis.service';
 import {
@@ -16,6 +18,7 @@ import {
   InternalServerErrorException,
   BadRequestException,
 } from '@nestjs/common';
+import * as speakeasy from "speakeasy";
 
 /**
  * Abstract AuthService containing core JWT/Redis logic.
@@ -30,6 +33,7 @@ export abstract class AuthServiceAbstract {
     protected readonly jwt: JwtService,
     protected readonly redis: RedisService,
     protected readonly userClient: ClientProxy,
+    protected readonly eventBus: IEventBus
   ) { }
 
   // ---------- JWT Signing Helpers ----------
@@ -77,7 +81,7 @@ export abstract class AuthServiceAbstract {
    * - Refresh token: longer-lived (e.g. 7d).
    * - Refresh is stored in Redis with TTL to allow revocation.
    */
-  protected async issuePair(user: UserPayload, expiresIn=getAccessTtl()) {
+  protected async issuePair(user: UserPayload, expiresIn = getAccessTtl()) {
     const aid = newJti();
     const rid = newJti();
 
@@ -91,7 +95,7 @@ export abstract class AuthServiceAbstract {
 
 
     return {
-      payload : {
+      payload: {
         accessPayload,
         refreshPayload
       },
@@ -171,4 +175,70 @@ export abstract class AuthServiceAbstract {
       expires_in: ttl,
     };
   }
+
+
+  // ---------- Send Email helper ----------
+  protected async sendEmailConfirmation(id: Snowflake, email: string) {
+    const TTL = 1000 * 60 * 60 * 24; // 1d
+    const confirmToken = this.jwt.sign(
+      { sub: String(id), email: email, action: "confirm_email" },
+      { expiresIn: TTL, secret: process.env.JWT_SECRET }
+    );
+
+    await this.eventBus.publish("notification.send.email", {
+      type: "CONFIRM_EMAIL",
+      to: email,
+      data: {
+        token: confirmToken,
+        confirmUrl: `${process.env.FRONTEND_URL}/auth/confirm/${confirmToken}`,
+      },
+    });
+  }
+
+  protected async confirmEmailRegister(token: string) {
+    try {
+      // 1. Verify token
+      const payload = this.jwt.verify(token, { secret: process.env.JWT_SECRET });
+
+      if (payload.action !== "confirm_email") throw new UnauthorizedException();
+
+      // 2. Publish event
+      await this.eventBus.publish("user.email.confirmed", {
+        userId: payload.sub,
+        email: payload.email,
+      });
+
+      return { message: "Email confirmed." };
+    } catch (e) {
+      throw new UnauthorizedException("Invalid or expired confirmation token");
+    }
+  }
+  // ----- OTP
+  protected async sendEmailResetPassword(id: Snowflake, email: string) {
+    const TTL = 60 * 15; // 15 min
+    // Generate code
+    const code = speakeasy.totp({
+      secret: process.env.OTP_SECRET_CODE,
+      digits: 5,
+      step: process.env.OTP_STEP_TIME ?? 1800,
+      encoding: "base32",
+    });
+
+    // Send reset email
+    await this.eventBus.publish("notification.send.email", {
+      type: "RESET_PASSWORD",
+      to: email,
+      data: { code },
+    });
+  }
+  protected async checkOTP(code: string) {
+    return speakeasy.totp.verify({
+      secret: process.env.OTP_SECRET_CODE,
+      token: code,
+      digits: 5,
+      step: process.env.OTP_STEP_TIME ?? 1800, 
+      encoding: "base32",
+    });
+  }
+
 }
