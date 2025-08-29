@@ -15,7 +15,7 @@ import { UserProxyService } from './proxy/user-proxy.service';
 
 @Injectable()
 export class AuthService extends AuthServiceAbstract {
-    protected userServiceTarget :   string  = "/users";
+    protected userServiceTarget: string = "/users";
     constructor(
         protected readonly jwt: JwtService,
         protected readonly redis: RedisService,
@@ -36,16 +36,17 @@ export class AuthService extends AuthServiceAbstract {
         this.sendEmailConfirmation(user.id, user.email);
 
         const payload: UserPayload = { sub: String(user.id), email: user.email, roles: user.roles, client: 'user' };
-        return { ...this.issuePair(payload), message: "Check your email to confirm your account." };
+        // return { ...this.issuePair(payload), message: "Check your email to confirm your account." };
+        return { ...user, message: "Check your email to confirm your account." };
     }
 
     async confirmRegister(token: string) {
         this.confirmEmailRegister(token);
     }
 
-    async resendConfirmationEmail(id: eventBusInterface.Snowflake, headers : any) {
+    async resendConfirmationEmail(id: eventBusInterface.Snowflake, headers: any) {
         const user = await this.userClient
-            .get(`${this.userServiceTarget}/me`, {headers}) as any;
+            .get(`${this.userServiceTarget}/me`, { headers }) as any;
 
         if (!user) throw new BadRequestException("No user found with this id.");
         if (user.isConfirmed) {
@@ -74,6 +75,10 @@ export class AuthService extends AuthServiceAbstract {
 
         if (!user) {
             throw new UnauthorizedException('Invalid credentials.');
+        }
+        if (!user.isConfirmed) {
+            this.sendEmailConfirmation(user.id, user.email);
+            throw new UnauthorizedException('Account not confirmed, confirmation email resent.');
         }
 
         const payload: UserPayload = { sub: String(user.id), email: user.email, roles: user.roles, client: 'user' };
@@ -161,8 +166,8 @@ export class AuthService extends AuthServiceAbstract {
     /**
      * Reset password demand
      */
-    async resetPasswordDemand(userId : eventBusInterface.Snowflake, headers: any) {
-        const user = await this.userClient.get(`${this.userServiceTarget}/me`, {headers}) as any;
+    async resetPasswordDemand(userId: eventBusInterface.Snowflake, headers: any) {
+        const user = await this.userClient.get(`${this.userServiceTarget}/me`, { headers }) as any;
         if (!user) throw new BadRequestException("No user found with this email");
 
         this.sendEmailResetPassword(user.id, user.email);
@@ -173,13 +178,13 @@ export class AuthService extends AuthServiceAbstract {
     /**
      * Reset password confirmation
      */
-    async resetPasswordConfirmation(code: string, userId : string, password : string, oldPassword : string, headers: any) {
+    async resetPasswordConfirmation(code: string, userId: string, password: string, oldPassword: string, headers: any) {
         // 1. Check OTP
         const match = this.checkOTP(code);
         if (!match) return new UnauthorizedException("Invalid/expired token");
 
         // 2. Edit password
-        return await this.userClient.patch(`${this.userServiceTarget}/me`, { password }, {headers});
+        return await this.userClient.patch(`${this.userServiceTarget}/me`, { password }, { headers });
     }
 
     /**
@@ -211,7 +216,7 @@ export class AuthService extends AuthServiceAbstract {
      * @throws UnauthorizedException if bot credentials are invalid
      */
     async getBotToken(id: string, token: string) {
-        const bot = await this.userClient.post('users/bot/checkLogin', { id , token: token }) as any; // TODO: replace with a User interface
+        const bot = await this.userClient.post('users/bot/checkLogin', { id, token: token }) as any; // TODO: replace with a User interface
 
         // const bot = {
         //     id: clientId,

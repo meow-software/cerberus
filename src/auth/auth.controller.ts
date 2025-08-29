@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Headers, HttpCode, HttpStatus, Inject, Post, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
@@ -8,6 +8,7 @@ import { ClientCredentialsDto } from './dto/client-credentials.dto';
 import { ResendConfirmationDto } from './dto/resend-confirmation.dto';
 import { ResetPasswordDemandDto } from './dto/reset-password.dto';
 import { ResetPasswordConfirmationDto } from './dto/reset-password-confirmation.dto';
+import { JwtAuthGuard } from './jwt-auth-guard';
 
 @Controller('auth')
 export class AuthController {
@@ -25,7 +26,7 @@ export class AuthController {
   }
 
   @Post('register/confirm/resend')
-  async resendConfirmation(@Body('email') dto: ResendConfirmationDto,
+  async resendConfirmation(@Body() dto: ResendConfirmationDto,
     @Req() req: Request
   ) {
     return this.auth.resendConfirmationEmail(dto.id, req.headers);
@@ -41,6 +42,7 @@ export class AuthController {
     return this.auth.getBotToken(dto.id, dto.clientSecret);
   }
 
+  @UseGuards(JwtAuthGuard)
   @Post('refresh')
   async refresh(
     @Body('refreshToken') dto: RefreshDto,
@@ -57,6 +59,7 @@ export class AuthController {
   }
 
 
+  @UseGuards(JwtAuthGuard)
   @Post('reset-password/confirmation')
   async resetPasswordConfirmation(
     @Body() dto: ResetPasswordConfirmationDto,
@@ -65,6 +68,8 @@ export class AuthController {
     return this.auth.resetPasswordConfirmation(dto.code, dto.id, dto.password, dto.oldPassword, req.headers);
   }
 
+  
+  @UseGuards(JwtAuthGuard)
   @Post('logout')
   async logout(@Body() dto: RefreshDto, @Req() req: Request) {
     const accessJti = req.headers['x-access-jti'] as string | undefined;
